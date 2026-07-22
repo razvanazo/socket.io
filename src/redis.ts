@@ -8,17 +8,39 @@ import { Room, Player, AttackLogEntry } from './types';
 
 let _redis: Redis | null = null;
 
+function buildRedisUrl(): string | null {
+  // 1. URL complet direct (cel mai simplu)
+  if (process.env.REDIS_URL) return process.env.REDIS_URL;
+
+  // 2. URL public Railway (dacă private networking e dezactivat)
+  if (process.env.REDIS_PUBLIC_URL) return process.env.REDIS_PUBLIC_URL;
+
+  // 3. Construiește din variabilele individuale pe care Railway le injectează automat
+  if (process.env.REDISHOST) {
+    const user = process.env.REDISUSER || 'default';
+    const pass = process.env.REDISPASSWORD || '';
+    const host = process.env.REDISHOST;
+    const port = process.env.REDISPORT || '6379';
+    return `redis://${user}:${pass}@${host}:${port}`;
+  }
+
+  return null;
+}
+
 function getRedis(): Redis | null {
   if (_redis) return _redis;
 
-  const url = process.env.REDIS_URL;
+  const url = buildRedisUrl();
+
   if (!url) {
-    console.warn('[redis] REDIS_URL lipsă – camerele nu vor fi persistate.');
+    console.warn('[redis] Nicio variabilă Redis găsită (REDIS_URL / REDISHOST) – camerele nu vor fi persistate.');
+    console.warn('[redis] Variabile disponibile:', Object.keys(process.env).filter(k => k.includes('REDIS')));
     return null;
   }
 
+  console.log('[redis] Conectare cu URL:', url.replace(/:([^:@]+)@/, ':***@'));
   _redis = new Redis(url);
-  _redis.on('connect', () => console.log('[redis] conectat'));
+  _redis.on('connect', () => console.log('[redis] conectat ✅'));
   _redis.on('error', (err) => console.error('[redis] eroare:', err.message));
   return _redis;
 }

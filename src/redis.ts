@@ -46,7 +46,10 @@ interface SerializedRoom {
 
 export async function persistRoom(room: Room): Promise<void> {
   const r = getRedis();
-  if (!r) return;
+  if (!r) {
+    console.warn('[redis] persistRoom ignorat – client null');
+    return;
+  }
 
   const data: SerializedRoom = {
     code: room.code,
@@ -60,13 +63,16 @@ export async function persistRoom(room: Room): Promise<void> {
     players: Array.from(room.players.values()),
   };
 
-  await r.set(ROOM_KEY(room.code), JSON.stringify(data), 'EX', ROOM_TTL_SEC);
+  const key = ROOM_KEY(room.code);
+  await r.set(key, JSON.stringify(data), 'EX', ROOM_TTL_SEC);
+  console.log(`[redis] salvat ${key} (phase=${room.phase}, players=${room.players.size})`);
 }
 
 export async function deletePersistedRoom(code: string): Promise<void> {
   const r = getRedis();
   if (!r) return;
   await r.del(ROOM_KEY(code));
+  console.log(`[redis] șters room:${code}`);
 }
 
 /**

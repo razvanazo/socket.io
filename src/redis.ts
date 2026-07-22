@@ -1,15 +1,27 @@
 import Redis from 'ioredis';
 import { Room, Player, AttackLogEntry } from './types';
 
-// ─── Client ───────────────────────────────────────────────────────────────────
+// ─── Client (lazy – instanțiat la primul apel, nu la import) ─────────────────
+//
+// Railway injectează env vars la runtime, nu la build time. Dacă am instanția
+// Redis la import, serverul ar crăpa în timpul build-ului unde REDIS_URL lipsă.
 
-const REDIS_URL = process.env.REDIS_URL;
-if (!REDIS_URL) throw new Error('REDIS_URL env var lipsă – configurează-l pe Railway.');
+let _redis: Redis | null = null;
 
-export const redis = new Redis(REDIS_URL);
+function getRedis(): Redis | null {
+  if (_redis) return _redis;
 
-redis.on('connect', () => console.log('[redis] conectat'));
-redis.on('error', (err) => console.error('[redis] eroare:', err.message));
+  const url = process.env.REDIS_URL;
+  if (!url) {
+    console.warn('[redis] REDIS_URL lipsă – camerele nu vor fi persistate.');
+    return null;
+  }
+
+  _redis = new Redis(url);
+  _redis.on('connect', () => console.log('[redis] conectat'));
+  _redis.on('error', (err) => console.error('[redis] eroare:', err.message));
+  return _redis;
+}
 
 // ─── Chei ─────────────────────────────────────────────────────────────────────
 
@@ -33,6 +45,9 @@ interface SerializedRoom {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export async function persistRoom(room: Room): Promise<void> {
+  const r = getRedis();
+  if (!r) return;
+
   const data: SerializedRoom = {
     code: room.code,
     hostId: room.hostId,
@@ -45,11 +60,13 @@ export async function persistRoom(room: Room): Promise<void> {
     players: Array.from(room.players.values()),
   };
 
-  await redis.set(ROOM_KEY(room.code), JSON.stringify(data), 'EX', ROOM_TTL_SEC);
+  await r.set(ROOM_KEY(room.code), JSON.stringify(data), 'EX', ROOM_TTL_SEC);
 }
 
 export async function deletePersistedRoom(code: string): Promise<void> {
-  await redis.del(ROOM_KEY(code));
+  const r = getRedis();
+  if (!r) return;
+  await r.del(ROOM_KEY(code));
 }
 
 /**
@@ -58,21 +75,23 @@ export async function deletePersistedRoom(code: string): Promise<void> {
  * (socket IDs și handlere de timere sunt invalide după restart).
  */
 export async function loadLobbyRooms(): Promise<Room[]> {
-  const keys = await redis.keys('room:*');
+  const r = getRedis();
+  if (!r) return [];
+  const keys = await r.keys('room:*');
   if (keys.length === 0) return [];
 
   const rooms: Room[] = [];
 
   for (const key of keys) {
     try {
-      const raw = await redis.get(key);
+      const raw = await r.get(key);
       if (!raw) continue;
 
       const data: SerializedRoom = JSON.parse(raw);
 
       // Restaurăm doar camerele în lobby (restul au socket IDs invalide)
       if (data.phase !== 'lobby') {
-        await redis.del(key); // curățăm camerele expirate
+        await r.del(key); // curățăm camerele expirate
         continue;
       }
 

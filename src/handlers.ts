@@ -1,6 +1,7 @@
 import { Socket } from 'socket.io';
 import { Room, Player, CreateRoomPayload, JoinRoomPayload, SubmitGuessPayload } from './types';
 import { GameEngine } from './engine';
+import { persistRoom } from './redis';
 import { roomSnapshot, generateRoomCode, generateTargetCode, evaluateGuess, activePlayers } from './helpers';
 import { WORD_LENGTH } from './constants';
 
@@ -72,6 +73,7 @@ export function registerHandlers(
 
         console.log(`[room] creat ${code} de ${playerName}`);
         ack({ ok: true, room: roomSnapshot(room), playerId: socket.id });
+        engine.broadcastRoom(room);
       } catch {
         ack({ ok: false, error: 'Nu s-a putut crea camera.' });
       }
@@ -165,6 +167,7 @@ export function registerHandlers(
 
       player.targetCode = code;
       player.hasChosenCode = true;
+      persistRoom(room).catch(console.error);
       ack({ ok: true });
     },
   );
